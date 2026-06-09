@@ -1,0 +1,6 @@
+data/
+eval/
+results/
+scripts/train/__pycache__/
+yolo11n.pt 
+utils/preprocessing/common_scripts/convert_to_onnx.py
