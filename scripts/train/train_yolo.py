@@ -21,7 +21,7 @@ def train(model, data, epochs, batch_size, imgsz, lr0, opt, output_dir):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train YOLO model with default settings.")
-    parser.add_argument('--yolo-version', type=str, choices=['yolov8', 'yolov9','yolov10', 'yolov11'], help='YOLO version to use')
+    parser.add_argument('--yolo-version', type=str, choices=['yolov8', 'yolov9', 'yolov10', 'yolo11', 'yolo12', 'yolo13', 'yolo26'], help='YOLO version to use')
     parser.add_argument('--model-path', type=str, required=True, help='Path to the pre-trained model weights')
     parser.add_argument('--data-path', type=str, required=True, help='Path to the dataset YAML file')
     parser.add_argument('--epochs', type=int, default=30, help='Number of training epochs (default: 30)')

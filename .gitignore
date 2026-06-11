@@ -2,5 +2,4 @@ data/
 eval/
 results/
 scripts/train/__pycache__/
-models/YOLO/
-utils/preprocessing/common_scripts/convert_to_onnx.py
+models/
