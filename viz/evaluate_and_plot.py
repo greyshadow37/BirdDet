@@ -291,6 +291,18 @@ def main():
     val_gts, val_preds, cats = load_data(val_anns, val_res)
     class_preds, class_total_gts, conf_mat = evaluate(val_gts, val_preds, cats)
     plot_curves_and_cm(class_preds, class_total_gts, conf_mat, cats, "Validation", val_out)
+    
+    test_anns = os.path.join(project_root, "data", "coco", "annotations", "instances_test2017.json")
+    test_res = os.path.join(project_root, "results", "test", "NanoDet", "model_best", "model_best", "results-1.json")
+    test_out = os.path.join(project_root, "viz", "nanodet_test_plots")
+    
+    if os.path.exists(test_res):
+        print("Evaluating Test Results...")
+        test_gts, test_preds, cats = load_data(test_anns, test_res)
+        class_preds, class_total_gts, conf_mat = evaluate(test_gts, test_preds, cats)
+        plot_curves_and_cm(class_preds, class_total_gts, conf_mat, cats, "Test", test_out)
+    else:
+        print(f"Test results not found at {test_res}")
 
 if __name__ == "__main__":
     main()
