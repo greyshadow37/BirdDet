@@ -1,5 +1,4 @@
 data/
-eval/
 results/
 scripts/train/__pycache__/
 models/
