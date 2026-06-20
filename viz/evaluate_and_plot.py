@@ -272,7 +272,7 @@ def plot_curves_and_cm(class_preds, class_total_gts, conf_mat, categories, split
     print(f"Saved all plots for {split_name} in {out_dir}")
 
 def main():
-    project_root = r"d:\Projects\Mini-Projects\Mini-Project-1\BirdDet"
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
     train_anns = os.path.join(project_root, "data", "coco", "annotations", "instances_train2017.json")
     train_res = os.path.join(project_root, "results", "train", "NanoDet", "results0.json")

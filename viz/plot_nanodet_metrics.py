@@ -18,7 +18,6 @@ def parse_nanodet_logs(log_path):
         
     for line in lines:
         # Parse train loss
-        # [NanoDet][12-18 03:00:36]INFO: Train|Epoch8/30|Iter400(37/52)| mem:6.18G| lr:8.00e-04| loss_qfl:0.2610| loss_bbox:0.4031| loss_dfl:0.2570|
         if "Train|Epoch" in line:
             epoch_match = re.search(r'Epoch(\d+)/', line)
             if epoch_match:
@@ -33,7 +32,6 @@ def parse_nanodet_logs(log_path):
                 if loss_dfl: epoch_train_losses[epoch]['loss_dfl'].append(float(loss_dfl.group(1)))
                 
         # Parse val loss
-        # [NanoDet][12-18 03:28:16]INFO: Val|Epoch10/30|Iter520(1/18)| mem:6.18G| lr:9.47e-04| loss_qfl:0.4354| loss_bbox:0.3816| loss_dfl:0.2370|
         elif "Val|Epoch" in line:
             epoch_match = re.search(r'Epoch(\d+)/', line)
             if epoch_match:
@@ -51,7 +49,6 @@ def parse_nanodet_logs(log_path):
                 if loss_dfl: val_losses['loss_dfl'].append(float(loss_dfl.group(1)))
                 
         # Parse val metrics
-        # [NanoDet][12-18 03:29:41]INFO: Val_metrics: {'mAP': 0.5680559931202742, 'AP_50': 0.8989968126497383, ...}
         elif "Val_metrics:" in line:
             map_match = re.search(r"'mAP': ([\d\.]+)", line)
             ap50_match = re.search(r"'AP_50': ([\d\.]+)", line)
@@ -106,10 +103,9 @@ def plot_yolo_style_metrics(log_path, output_path):
     print(f"Metrics plot saved to {output_path}")
 
 if __name__ == "__main__":
-    project_root = r"d:\Projects\Mini-Projects\Mini-Project-1\BirdDet"
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     log_dir = os.path.join(project_root, "results", "train", "NanoDet")
     
-    # Find the logs.txt inside the newest logs directory
     log_txt_path = None
     for item in os.listdir(log_dir):
         if item.startswith("logs-"):
