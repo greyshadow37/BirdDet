@@ -2,3 +2,4 @@ data/
 results/
 scripts/train/__pycache__/
 models/
+inference/__pycache__

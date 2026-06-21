@@ -59,70 +59,12 @@ def export_nanodet(model_path, config_path=None, search_dir='.'):
         else:
             print("Note: NanoDet requires a config file to rebuild the architecture for export.")
             print("Could not auto-find it. Please pass --nanodet_cfg <path>.")
-    except ImportError:
-        print("Error: 'nanodet' library is not installed.")
+    except ImportError as e:
+        print(f"Error: 'nanodet' library is not installed. Details: {e}")
+        import traceback
+        traceback.print_exc()
     except Exception as e:
         print(f"Error exporting NanoDet model {model_path}: {e}")
-
-def export_effdet(model_path):
-    print(f"\n--- Exporting EfficientDet model: {model_path} ---")
-    try:
-        # Import EfficientDet
-        try:
-            import effdet
-            from effdet import create_model
-        except ImportError:
-            print("Error: 'effdet' library not installed. Please run: pip install effdet")
-            return
-
-        print("Attempting to load PyTorch checkpoint...")
-        
-        model = None
-        # Try FastAI load_learner first
-        if model_path.endswith('.pkl'):
-            try:
-                from fastai.learner import load_learner
-                print("Detected .pkl, attempting to load as FastAI Learner...")
-                learn = load_learner(model_path)
-                model = learn.model
-            except ImportError:
-                print("fastai not installed, cannot load fastai learner.")
-            except Exception as e:
-                print(f"FastAI load failed: {e}")
-
-        # Fallback to standard torch.load
-        if model is None:
-            checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
-            
-            if hasattr(checkpoint, 'model'): # FastAI Learner fallback if unpickled directly
-                model = checkpoint.model
-            elif isinstance(checkpoint, torch.nn.Module):
-                model = checkpoint
-            elif isinstance(checkpoint, dict):
-                print("Found state_dict. Attempting to initialize model...")
-                # EffDet usually requires the model name (e.g. tf_efficientdet_d0). 
-                arch = checkpoint.get('config', {}).get('architecture', 'tf_efficientdet_d0')
-                if 'config' not in checkpoint:
-                    print("Architecture not found in config, defaulting to 'tf_efficientdet_d0'")
-                
-                model = create_model(arch, bench_task='', num_classes=5) # Bypass NMS for ONNX export
-                model.load_state_dict(checkpoint.get('state_dict', checkpoint), strict=False)
-            else:
-                print("Unrecognized checkpoint format.")
-                return
-
-        model.eval()
-        dummy_input = torch.randn(1, 3, 512, 512) # Default image size
-        
-        output_path = model_path.replace('.pkl', '.onnx').replace('.pth', '.onnx')
-        if output_path == model_path:
-            output_path += ".onnx"
-            
-        torch.onnx.export(model, dummy_input, output_path, opset_version=16)
-        print(f"Successfully exported EfficientDet model to {output_path}")
-            
-    except Exception as e:
-        print(f"Error exporting EfficientDet model {model_path}: {e}")
 
 def main():
     parser = argparse.ArgumentParser(description="Convert model best weights to ONNX format.")
@@ -132,17 +74,16 @@ def main():
     
     args = parser.parse_args()
 
-    # List of models specified by the user
     yolo_models = [
-        'yolov8_best.pt',
-        'yolov9_best.pt',
-        'yolov10_best.pt',
-        'yolov11_best.pt'
+        'yolo26.pt',
+        'yolov10.pt',
+        'yolov11.pt',
+        'yolov12.pt',
+        'RT-DETR.pt'
     ]
     nanodet_model = 'nanodet_model_best.pth'
-    effdet_model = 'effdet_rezipped.pth'
 
-    # Convert YOLO models
+    # Convert YOLO and RT-DETR models
     if not args.skip_yolo:
         for ym in yolo_models:
             path = os.path.join(args.weights_dir, ym)
@@ -154,16 +95,16 @@ def main():
     # Convert NanoDet model
     nd_path = os.path.join(args.weights_dir, nanodet_model)
     if os.path.exists(nd_path):
-        export_nanodet(nd_path, args.nanodet_cfg)
+        # Auto-find train_cfg.yml if no config provided
+        cfg_path = args.nanodet_cfg
+        if not cfg_path:
+            potential_cfg = os.path.join('BirdDet', 'results', 'train', 'NanoDet', 'logs-2025-12-18-01-29-46', 'train_cfg.yml')
+            if os.path.exists(potential_cfg):
+                cfg_path = potential_cfg
+        export_nanodet(nd_path, cfg_path)
     else:
         print(f"\nModel file not found: {nd_path}")
 
-    # Convert EfficientDet model
-    ed_path = os.path.join(args.weights_dir, effdet_model)
-    if os.path.exists(ed_path):
-        export_effdet(ed_path)
-    else:
-        print(f"\nModel file not found: {ed_path}")
 
 if __name__ == '__main__':
     main()
