@@ -42,6 +42,11 @@ def get_model_fallback_info(model_path):
 def preprocess_image(image_path, target_size):
     """Loads and preprocesses an image for inference."""
     try:
+        if not image_path:
+            return None
+        if os.path.isdir(image_path):
+            print(f"Warning: '{image_path}' is a directory, not an image file. Skipping.")
+            return None
         img = Image.open(image_path).convert('RGB')
         img = img.resize(target_size)
         img_np = np.array(img, dtype=np.float32) / 255.0
