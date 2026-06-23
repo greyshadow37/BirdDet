@@ -45,7 +45,7 @@ def preprocess_image(image_path, target_size):
         img = Image.open(image_path).convert('RGB')
         img = img.resize(target_size)
         img_np = np.array(img, dtype=np.float32) / 255.0
-        # HWC to CHW (ncnn/onnx/pytorch expect CHW)
+        # HWC to CHW (ncnn/onnx expect CHW)
         img_np = img_np.transpose((2, 0, 1))
         return np.expand_dims(img_np, axis=0)
     except Exception as e:
@@ -54,13 +54,10 @@ def preprocess_image(image_path, target_size):
 
 def run_ncnn_inference(model_name, param_path, bin_path, image_path, fallback_size, outputs_list, benchmark=False, num_runs=100):
     """Runs inference using NCNN backend."""
-    import ncnn
-    total_size = (os.path.getsize(param_path) + os.path.getsize(bin_path)) / (1024 * 1024)
-    
     metrics = {
         'model': model_name,
         'format': 'NCNN',
-        'size_mb': round(total_size, 3),
+        'size_mb': 0.0,
         'avg_latency_ms': 0.0,
         'std_latency_ms': 0.0,
         'fps': 0.0,
@@ -69,6 +66,15 @@ def run_ncnn_inference(model_name, param_path, bin_path, image_path, fallback_si
     }
     
     try:
+        import ncnn
+    except ImportError:
+        metrics['status'] = 'failed: ncnn library is not installed'
+        return metrics
+
+    try:
+        total_size = (os.path.getsize(param_path) + os.path.getsize(bin_path)) / (1024 * 1024)
+        metrics['size_mb'] = round(total_size, 3)
+        
         # Preprocess input image using fallback size
         if image_path:
             input_tensor = preprocess_image(image_path, fallback_size)
@@ -114,13 +120,10 @@ def run_ncnn_inference(model_name, param_path, bin_path, image_path, fallback_si
 
 def run_onnx_inference(model_name, model_path, image_path, fallback_size, benchmark=False, num_runs=100):
     """Runs inference using ONNX Runtime backend with dynamic input shape detection."""
-    import onnxruntime as ort
-    total_size = os.path.getsize(model_path) / (1024 * 1024)
-    
     metrics = {
         'model': model_name,
         'format': 'ONNX',
-        'size_mb': round(total_size, 3),
+        'size_mb': 0.0,
         'avg_latency_ms': 0.0,
         'std_latency_ms': 0.0,
         'fps': 0.0,
@@ -129,6 +132,15 @@ def run_onnx_inference(model_name, model_path, image_path, fallback_size, benchm
     }
     
     try:
+        import onnxruntime as ort
+    except ImportError:
+        metrics['status'] = 'failed: onnxruntime library is not installed'
+        return metrics
+
+    try:
+        total_size = os.path.getsize(model_path) / (1024 * 1024)
+        metrics['size_mb'] = round(total_size, 3)
+        
         session = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
         input_meta = session.get_inputs()[0]
         input_name = input_meta.name
@@ -184,26 +196,37 @@ def run_onnx_inference(model_name, model_path, image_path, fallback_size, benchm
 
 def run_tflite_inference(model_name, model_path, image_path, fallback_size, benchmark=False, num_runs=100):
     """Runs inference using TensorFlow Lite backend with dynamic input shape detection."""
-    import tensorflow as tf
-    total_size = os.path.getsize(model_path) / (1024 * 1024)
-    
     metrics = {
         'model': model_name,
         'format': 'TFLite',
-        'size_mb': round(total_size, 3),
+        'size_mb': 0.0,
         'avg_latency_ms': 0.0,
         'std_latency_ms': 0.0,
         'fps': 0.0,
         'ram_mb': 0.0,
         'status': 'success'
     }
-    
+
     try:
+        import tensorflow as tf
+        Interpreter = tf.lite.Interpreter
+    except ImportError:
+        try:
+            import tflite_runtime.interpreter as tflite
+            Interpreter = tflite.Interpreter
+        except ImportError:
+            metrics['status'] = "failed: neither 'tensorflow' nor 'tflite-runtime' is installed"
+            return metrics
+
+    try:
+        total_size = os.path.getsize(model_path) / (1024 * 1024)
+        metrics['size_mb'] = round(total_size, 3)
+
         # Disable XNNPACK delegate if running NanoDet INT8 to prevent Windows crash
         if 'nanodet' in model_name.lower() and 'int8' in model_name.lower():
-            interpreter = tf.lite.Interpreter(model_path=model_path, num_threads=4)
+            interpreter = Interpreter(model_path=model_path, num_threads=4)
         else:
-            interpreter = tf.lite.Interpreter(model_path=model_path)
+            interpreter = Interpreter(model_path=model_path)
             
         interpreter.allocate_tensors()
         input_details = interpreter.get_input_details()
@@ -238,9 +261,9 @@ def run_tflite_inference(model_name, model_path, image_path, fallback_size, benc
             tflite_input = input_tensor
             
         # Cast dtype dynamically
-        if input_dtype == np.uint8:
+        if input_dtype == np.uint8 or (hasinstance := isinstance(input_dtype, type) and input_dtype.__name__ == 'uint8'):
             tflite_input = (tflite_input * 255.0).astype(np.uint8)
-        elif input_dtype == np.int8:
+        elif input_dtype == np.int8 or (hasinstance := isinstance(input_dtype, type) and input_dtype.__name__ == 'int8'):
             tflite_input = ((tflite_input * 255.0) - 128).astype(np.int8)
         else:
             tflite_input = tflite_input.astype(np.float32)
@@ -264,113 +287,6 @@ def run_tflite_inference(model_name, model_path, image_path, fallback_size, benc
             metrics['std_latency_ms'] = round(np.std(latencies), 3)
             metrics['fps'] = round(1000.0 / avg_lat, 2)
             metrics['ram_mb'] = round(mem_end, 2)
-        return metrics
-    except Exception as e:
-        metrics['status'] = f"failed: {str(e)}"
-        return metrics
-
-def run_pytorch_inference(model_name, model_path, image_path, fallback_size, benchmark=False, num_runs=100):
-    """Runs inference using PyTorch backend."""
-    import torch
-    total_size = os.path.getsize(model_path) / (1024 * 1024)
-    
-    metrics = {
-        'model': model_name,
-        'format': 'PyTorch',
-        'size_mb': round(total_size, 3),
-        'avg_latency_ms': 0.0,
-        'std_latency_ms': 0.0,
-        'fps': 0.0,
-        'ram_mb': 0.0,
-        'status': 'success'
-    }
-    
-    try:
-        # Preprocess input image using fallback size
-        if image_path:
-            input_tensor = preprocess_image(image_path, fallback_size)
-        else:
-            input_tensor = np.random.rand(1, 3, fallback_size[1], fallback_size[0]).astype(np.float32)
-            
-        if input_tensor is None:
-            raise ValueError("Input tensor preprocessing failed.")
-
-        torch_tensor = torch.from_numpy(input_tensor).float()
-        
-        if 'nanodet' in model_name.lower():
-            # Load NanoDet model
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            nanodet_dir = os.path.abspath(os.path.join(script_dir, '..', '..', 'nanodet'))
-            if nanodet_dir not in sys.path:
-                sys.path.insert(0, nanodet_dir)
-                
-            from nanodet.model.arch import build_model
-            from nanodet.util.config import cfg, load_config
-            
-            # Find train_cfg.yml
-            potential_cfgs = glob.glob(os.path.join(script_dir, '..', 'results', 'train', 'NanoDet', '**', 'train_cfg.yml'), recursive=True)
-            if not potential_cfgs:
-                raise FileNotFoundError("Could not find train_cfg.yml for NanoDet")
-            
-            load_config(cfg, potential_cfgs[0])
-            
-            # Update config input size to match fallback_size if needed
-            cfg.defrost()
-            cfg.data.val.input_size = [fallback_size[1], fallback_size[0]]
-            cfg.freeze()
-            
-            model = build_model(cfg.model)
-            checkpoint = torch.load(model_path, map_location='cpu')
-            state_dict = checkpoint.get('state_dict', checkpoint)
-            if any(k.startswith('model.') for k in state_dict.keys()):
-                state_dict = {k.replace('model.', ''): v for k, v in state_dict.items()}
-            model.load_state_dict(state_dict, strict=False)
-            model.eval()
-            
-            # Warmup
-            with torch.no_grad():
-                model(torch_tensor)
-                
-            if benchmark:
-                latencies = []
-                mem_start = get_peak_memory()
-                with torch.no_grad():
-                    for _ in range(num_runs):
-                        t0 = time.perf_counter()
-                        model(torch_tensor)
-                        latencies.append((time.perf_counter() - t0) * 1000.0)
-                mem_end = get_peak_memory()
-                
-                avg_lat = np.mean(latencies)
-                metrics['avg_latency_ms'] = round(avg_lat, 3)
-                metrics['std_latency_ms'] = round(np.std(latencies), 3)
-                metrics['fps'] = round(1000.0 / avg_lat, 2)
-                metrics['ram_mb'] = round(mem_end, 2)
-        else:
-            # YOLO / RT-DETR
-            from ultralytics import YOLO
-            model = YOLO(model_path)
-            
-            # Use numpy input for ultralytics YOLO predict to keep it consistent
-            raw_img = np.transpose(input_tensor[0], (1, 2, 0)) # CHW to HWC
-            
-            # Warmup
-            model.predict(raw_img, imgsz=fallback_size[0], device='cpu', verbose=False)
-            
-            if benchmark:
-                latencies = []
-                mem_start = get_peak_memory()
-                for _ in range(num_runs):
-                    t0 = time.perf_counter()
-                    model.predict(raw_img, imgsz=fallback_size[0], device='cpu', verbose=False)
-                    latencies.append((time.perf_counter() - t0) * 1000.0)
-                mem_end = get_peak_memory()
-                
-                avg_lat = np.mean(latencies)
-                metrics['avg_latency_ms'] = round(avg_lat, 3)
-                metrics['std_latency_ms'] = round(np.std(latencies), 3)
-                metrics['fps'] = round(1000.0 / avg_lat, 2)
-                metrics['ram_mb'] = round(mem_end, 2)
         return metrics
     except Exception as e:
         metrics['status'] = f"failed: {str(e)}"
@@ -415,21 +331,7 @@ def main():
     image_paths = [args.image] if args.image else [None]
     results = []
     
-    # --- 1. PyTorch (.pt, .pth) ---
-    pt_dir = os.path.join(weights_dir, 'pt_or_pth')
-    if os.path.exists(pt_dir):
-        pt_files = glob.glob(os.path.join(pt_dir, '*.pt')) + glob.glob(os.path.join(pt_dir, '*.pth'))
-        for pf in pt_files:
-            model_name = os.path.basename(pf)
-            size, _ = get_model_fallback_info(pf)
-            for img in image_paths:
-                img_name = os.path.basename(img) if img else "dummy_input"
-                print(f"Running PyTorch: {model_name}...")
-                res = run_pytorch_inference(model_name, pf, img, size, args.benchmark, args.num_runs)
-                res['image'] = img_name
-                results.append(res)
-                    
-    # --- 2. ONNX (Standard & INT8) ---
+    # --- 1. ONNX (Standard & INT8) ---
     for sub in ['onnx', 'onnx_int8']:
         o_dir = os.path.join(weights_dir, sub)
         if os.path.exists(o_dir):
@@ -444,7 +346,7 @@ def main():
                     res['image'] = img_name
                     results.append(res)
                         
-    # --- 3. TFLite (Standard & INT8) ---
+    # --- 2. TFLite (Standard & INT8) ---
     for sub in ['tflite', 'tflite_int8']:
         tf_dir = os.path.join(weights_dir, sub)
         if os.path.exists(tf_dir):
@@ -464,7 +366,7 @@ def main():
                     res['image'] = img_name
                     results.append(res)
                         
-    # --- 4. NCNN ---
+    # --- 3. NCNN ---
     ncnn_dir = os.path.join(weights_dir, 'ncnn')
     if os.path.exists(ncnn_dir):
         subdirs = [os.path.join(ncnn_dir, d) for d in os.listdir(ncnn_dir) if os.path.isdir(os.path.join(ncnn_dir, d))]
