@@ -8,7 +8,7 @@ echo -e "${GREEN}=== Starting Bird Detection Benchmarks on Raspberry Pi ===${NC}
 
 # Navigate to the project root directory where the script resides
 CDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-cd "$CDIR"
+cd "$CDIR/.."
 
 # Activate the Python 3.9 virtual environment
 if [ -d "bird_venv" ]; then
