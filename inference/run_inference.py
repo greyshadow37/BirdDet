@@ -327,8 +327,16 @@ def main():
         
     print(f"Using weights directory: {weights_dir}")
     
-    # Setup image path
-    image_paths = [args.image] if args.image else [None]
+    # Setup image paths (handles directory of images or single image)
+    image_paths = []
+    if args.image:
+        if os.path.isdir(args.image):
+            valid_exts = ('.jpg', '.jpeg', '.png', '.bmp')
+            image_paths = [os.path.join(args.image, f) for f in os.listdir(args.image) if f.lower().endswith(valid_exts)]
+        else:
+            image_paths = [args.image]
+    else:
+        image_paths = [None]
     results = []
     
     # --- 1. ONNX (Standard & INT8) ---
