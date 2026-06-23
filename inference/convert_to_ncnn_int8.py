@@ -2,11 +2,15 @@ import os
 import sys
 
 def main():
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # Fix paths to resolve inside the 'BirdDet' folder
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)  # d:\...\BirdDet
     weights_dir = os.path.join(project_root, "best_weights")
     onnx_dir = os.path.join(weights_dir, "onnx")
     ncnn_dir = os.path.join(weights_dir, "ncnn")
-    pi_images_dir = os.path.join(project_root, "pi_images")
+    
+    # pi_images is located in the parent directory of BirdDet
+    pi_images_dir = os.path.join(os.path.dirname(project_root), "pi_images")
     
     os.makedirs(ncnn_dir, exist_ok=True)
     
@@ -21,7 +25,6 @@ def main():
             f.write(f"../pi_images/{img}\n")
             
     # 2. Write a shell script for running quantization on the Raspberry Pi
-    # Since ncnn2table and ncnnoptimize are typically compiled on the deployment Pi
     sh_script_path = os.path.join(weights_dir, "quantize_ncnn_on_pi.sh")
     print(f"Writing Pi quantization helper script to: {sh_script_path}")
     
@@ -43,18 +46,19 @@ for model in "${models[@]}"; do
     echo ""
     echo "--- Quantizing $model ---"
     
-    # Set paths
-    ONNX_FILE="onnx/$model.onnx"
-    PARAM_FILE="ncnn/${model}_ncnn/model.ncnn.param"
-    BIN_FILE="ncnn/${model}_ncnn/model.ncnn.bin"
-    TABLE_FILE="ncnn_int8/$model.table"
-    OUT_PARAM="ncnn_int8/${model}_int8.param"
-    OUT_BIN="ncnn_int8/${model}_int8.bin"
-    
-    if [ ! -f "$PARAM_FILE" ]; then
-        # Handle different subfolder layouts if any
-        PARAM_FILE="ncnn/${model}_ncnn/model.param"
-        BIN_FILE="ncnn/${model}_ncnn/model.bin"
+    # Set paths dynamically based on model name
+    if [ "$model" == "nanodet_model_best" ]; then
+        PARAM_FILE="onnx/nanodet_model_best_self_contained.ncnn.param"
+        BIN_FILE="onnx/nanodet_model_best_self_contained.ncnn.bin"
+        TABLE_FILE="ncnn_int8/nanodet_model_best.table"
+        OUT_PARAM="ncnn_int8/nanodet_model_best_int8.param"
+        OUT_BIN="ncnn_int8/nanodet_model_best_int8.bin"
+    else
+        PARAM_FILE="ncnn/${model}_ncnn/model.ncnn.param"
+        BIN_FILE="ncnn/${model}_ncnn/model.ncnn.bin"
+        TABLE_FILE="ncnn_int8/$model.table"
+        OUT_PARAM="ncnn_int8/${model}_int8.param"
+        OUT_BIN="ncnn_int8/${model}_int8.bin"
     fi
 
     # Step 1: Generate calibration table using ncnn2table
@@ -74,8 +78,9 @@ for model in "${models[@]}"; do
     fi
     
     echo "Generating calibration table: $TABLE_FILE"
+    # Format parameters correctly as key=[val1,val2,val3] for ncnn2table
     ncnn2table "$PARAM_FILE" "$BIN_FILE" ncnn_calibration_list.txt "$TABLE_FILE" \
-        size="$img_size" mean="$mean_vals" norm="$norm_vals" shape=3,${img_size//,/x} pixel=BGR thread=4
+        mean="[$mean_vals]" norm="[$norm_vals]" shape="[$img_size,3]" pixel=BGR thread=4
         
     # Step 2: Optimize and Quantize model to INT8
     echo "Creating quantized INT8 model..."
