@@ -4,12 +4,46 @@ import glob
 import sys
 import torch
 
+def fix_onnx_compatibility(onnx_path):
+    """Post-processes an ONNX model to force compatibility with older runtimes (like Pi)."""
+    print(f"Post-processing {onnx_path} for Raspberry Pi compatibility...")
+    try:
+        import onnx
+        model = onnx.load(onnx_path)
+        modified = False
+        
+        # Force IR version to 9
+        if model.ir_version > 9:
+            print(f"  Downgrading IR version from {model.ir_version} to 9")
+            model.ir_version = 9
+            modified = True
+            
+        # Force Opset version to 17 or lower
+        for opset in model.opset_import:
+            if (opset.domain == "" or opset.domain == "ai.onnx") and opset.version > 17:
+                print(f"  Downgrading Opset version from {opset.version} to 17")
+                opset.version = 17
+                modified = True
+                
+        if modified:
+            onnx.save(model, onnx_path)
+            print(f"Successfully saved compatibility changes to {onnx_path}")
+        else:
+            print("  Already compatible.")
+    except Exception as e:
+        print(f"Warning: Could not post-process {onnx_path} for compatibility: {e}")
+
 def export_yolo(model_path):
     print(f"\n--- Exporting YOLO model: {model_path} ---")
     try:
         from ultralytics import YOLO
         model = YOLO(model_path)
-        model.export(format='onnx')
+        # Export with opset=17 for Pi compatibility
+        exported_path = model.export(format='onnx', opset=17)
+        if not exported_path:
+            exported_path = model_path.replace('.pt', '.onnx')
+        if os.path.exists(exported_path):
+            fix_onnx_compatibility(exported_path)
         print(f"Successfully exported {model_path} to ONNX")
     except ImportError:
         print("Error: 'ultralytics' library is not installed. Please run: pip install ultralytics")
@@ -55,6 +89,7 @@ def export_nanodet(model_path, config_path=None, search_dir='.'):
                 input_names=['data'], 
                 output_names=['output']
             )
+            fix_onnx_compatibility(output_path)
             print(f"Successfully exported NanoDet to {output_path}")
         else:
             print("Note: NanoDet requires a config file to rebuild the architecture for export.")
@@ -98,7 +133,7 @@ def main():
         # Auto-find train_cfg.yml if no config provided
         cfg_path = args.nanodet_cfg
         if not cfg_path:
-            potential_cfg = os.path.join('BirdDet', 'results', 'train', 'NanoDet', 'logs-2025-12-18-01-29-46', 'train_cfg.yml')
+            potential_cfg = os.path.join('results', 'train', 'NanoDet', 'logs-2025-12-18-01-29-46', 'train_cfg.yml')
             if os.path.exists(potential_cfg):
                 cfg_path = potential_cfg
         export_nanodet(nd_path, cfg_path)

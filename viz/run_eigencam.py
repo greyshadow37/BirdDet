@@ -69,17 +69,35 @@ def load_nanodet_model(model_path, config_path):
     return model
 
 def main():
-    weights_dir = os.path.join(PROJECT_ROOT, "best_weights", "pt_or_pth")
-    pi_images_dir = os.path.join(PROJECT_ROOT, "pi_images")
-    output_dir = os.path.join(PROJECT_ROOT, "results", "eigencam")
-    os.makedirs(output_dir, exist_ok=True)
+    import argparse
+    parser = argparse.ArgumentParser(description="Run SVD-based EigenCAM visualizations on PyTorch weights.")
+    parser.add_argument(
+        "--images_dir",
+        type=str,
+        default=os.path.join(PROJECT_ROOT, "BirdDet", "data", "yolo", "images", "test"),
+        help="Directory containing input images to process."
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=os.path.join(PROJECT_ROOT, "results", "eigencam"),
+        help="Directory to save EigenCAM visualization images."
+    )
+    args = parser.parse_args()
+
+    weights_dir = os.path.join(PROJECT_ROOT, "BirdDet", "best_weights", "pt_or_pth")
+    input_images_dir = args.images_dir
+    base_output_dir = args.output_dir
+    os.makedirs(base_output_dir, exist_ok=True)
     
     # List of images
-    image_paths = glob.glob(os.path.join(pi_images_dir, "*.jpg")) + glob.glob(os.path.join(pi_images_dir, "*.png"))
+    image_paths = glob.glob(os.path.join(input_images_dir, "*.jpg")) + glob.glob(os.path.join(input_images_dir, "*.png"))
     if not image_paths:
-        print(f"No test images found in {pi_images_dir}!")
+        print(f"No test images found in {input_images_dir}!")
         return
         
+    print(f"Found {len(image_paths)} images to process from: {input_images_dir}")
+
     # Model configuration definitions
     models_to_run = [
         {"name": "yolo26", "path": os.path.join(weights_dir, "yolo26.pt"), "type": "yolo"},
@@ -101,6 +119,10 @@ def main():
             
         print(f"\n--- Running EigenCAM for model: {m_name} ---")
         
+        # Create model-specific subdirectory
+        model_output_dir = os.path.join(base_output_dir, m_name)
+        os.makedirs(model_output_dir, exist_ok=True)
+
         # Load model and hook target head layer
         captured_features = []
         
@@ -127,9 +149,10 @@ def main():
         hook_handle = head_layer.register_forward_hook(hook_fn)
         
         # Process each image
-        for img_path in image_paths:
+        for i, img_path in enumerate(image_paths, 1):
             img_name = os.path.splitext(os.path.basename(img_path))[0]
-            print(f"Processing image: {img_name}")
+            if i % 50 == 0 or i == len(image_paths) or i <= 5:
+                print(f"[{i}/{len(image_paths)}] Processing image: {img_name}")
             
             # Load and preprocess
             orig_img = cv2.imread(img_path)
@@ -146,13 +169,10 @@ def main():
             # Forward pass
             captured_features.clear()
             with torch.no_grad():
-                if m_cfg["type"] in ["yolo", "rtdetr"]:
-                    pyt_model(img_tensor)
-                else:
-                    pyt_model(img_tensor)
+                pyt_model(img_tensor)
                     
             if not captured_features:
-                print(f"Warning: Failed to capture feature maps for {m_name}")
+                print(f"Warning: Failed to capture feature maps for {m_name} on {img_name}")
                 continue
                 
             # Extract feature maps
@@ -164,12 +184,12 @@ def main():
             
             # Overlay and save
             result_img = overlay_heatmap(img_path, heatmap)
-            out_path = os.path.join(output_dir, f"{m_name}_{img_name}_eigencam.jpg")
+            out_path = os.path.join(model_output_dir, f"{img_name}_eigencam.jpg")
             cv2.imwrite(out_path, result_img)
-            print(f"Saved EigenCAM result to: {out_path}")
             
         # Remove hook
         hook_handle.remove()
+        print(f"Finished {m_name}. Results saved to: {model_output_dir}")
 
 if __name__ == "__main__":
     main()

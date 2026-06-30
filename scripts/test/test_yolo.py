@@ -1,27 +1,52 @@
-from ultralytics import YOLO
 import argparse
 import os
+import yaml
+from ultralytics import YOLO
 
-def test(model, data, imgsz, batch_size, output_dir):
-    results = model.val(
-        data=data,
+def test(model, data_yaml_path, imgsz, output_dir, images_dir=None):
+    if images_dir:
+        test_images_dir = os.path.abspath(images_dir)
+    else:
+        # Load dataset configuration
+        with open(data_yaml_path, 'r') as f:
+            data_cfg = yaml.safe_load(f)
+        
+        # Resolve absolute path to test images
+        base_path = data_cfg.get('path', '')
+        test_path = data_cfg.get('test', '')
+        
+        if not os.path.isabs(base_path):
+            base_path = os.path.abspath(os.path.join(os.path.dirname(data_yaml_path), base_path))
+            
+        test_images_dir = os.path.join(base_path, test_path)
+        if not os.path.exists(test_images_dir):
+            # Fallback to local relative path check
+            test_images_dir = os.path.abspath(os.path.join(os.path.dirname(data_yaml_path), 'images', 'test'))
+        
+    print(f"Running predictions on test images from: {test_images_dir}")
+    
+    # Run predictions and save annotated images with bounding boxes
+    results = model.predict(
+        source=test_images_dir,
         imgsz=imgsz,
-        batch=batch_size,
-        save_json=True,
+        save=True,
         project=output_dir,
-        name="output",
-        exist_ok=False,
-        split='test'
+        name="predictions",
+        exist_ok=True,
+        conf=0.25
     )
+    
+    predictions_output_dir = os.path.abspath(os.path.join(output_dir, "predictions"))
+    print(f"Testing complete. Bounding box predictions saved to: {predictions_output_dir}")
     return results
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Test YOLO model after training.")
+    parser = argparse.ArgumentParser(description="Test YOLO model by generating bounding boxes.")
     parser.add_argument('--model-path', type=str, required=True, help='Path to trained model weights')
     parser.add_argument('--data-path', type=str, required=True, help='Path to dataset YAML file')
-    parser.add_argument('--batch-size', type=int, default=4, help='Batch size for testing (default: 4)')
     parser.add_argument('--img-size', type=int, default=512, help='Image size (default: 512)')
     parser.add_argument('--output-dir', type=str, default="test_yolo_results", help='Directory for test results')
+    parser.add_argument('--images-dir', type=str, default=None, help='Path to test images folder')
 
     args = parser.parse_args()
 
@@ -34,8 +59,8 @@ if __name__ == "__main__":
 
     test(
         model=model,
-        data=args.data_path,
+        data_yaml_path=args.data_path,
         imgsz=args.img_size,
-        batch_size=args.batch_size,
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        images_dir=args.images_dir
     )

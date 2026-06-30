@@ -1,9 +1,11 @@
 import argparse
 import os
 import sys
+import glob
+import cv2
 import torch
 
-def test(config_path, model_path, output_dir):
+def test(config_path, model_path, output_dir, images_dir=None):
     # Add nanodet repository to python path
     nanodet_repo = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'nanodet'))
     if nanodet_repo not in sys.path:
@@ -11,49 +13,35 @@ def test(config_path, model_path, output_dir):
 
     try:
         from nanodet.util import cfg, load_config, Logger
+        from nanodet.data.transform import Pipeline
+        from nanodet.data.batch_process import stack_batch_img
         from nanodet.data.collate import naive_collate
-        from nanodet.data.dataset import build_dataset
         from nanodet.model.arch import build_model
-        from nanodet.evaluator import build_evaluator
-        from torch.utils.data import DataLoader
     except ImportError as e:
         print(f"Error importing nanodet modules: {e}")
-        return None
+        return
 
     print("Loading config...")
     load_config(cfg, config_path)
     
-    # Dynamically override dataset paths to match current environment structure
-    cfg.defrost()
-    bird_det_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-    cfg.data.val.ann_path = os.path.join(bird_det_dir, 'data', 'coco', 'annotations', 'instances_test2017.json')
-    cfg.data.val.img_path = os.path.join(bird_det_dir, 'data', 'coco', 'images', 'test2017')
-    cfg.freeze()
+    # Resolve directories
+    if images_dir:
+        test_images_dir = os.path.abspath(images_dir)
+    else:
+        bird_det_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        test_images_dir = os.path.join(bird_det_dir, 'data', 'coco', 'images', 'test2017')
+        
+    predictions_output_dir = os.path.join(output_dir, "predictions")
+    os.makedirs(predictions_output_dir, exist_ok=True)
     
-    # Initialize logger
-    logger = Logger(-1, output_dir, False)
-
-    print("Building dataset...")
-    val_dataset = build_dataset(cfg.data.val, "val")
-    val_dataloader = DataLoader(
-        val_dataset,
-        batch_size=cfg.device.batchsize_per_gpu,
-        shuffle=False,
-        num_workers=cfg.device.workers_per_gpu,
-        pin_memory=True,
-        collate_fn=naive_collate,
-        drop_last=False,
-    )
-
     print("Building model...")
     model = build_model(cfg.model)
     
     print(f"Loading weights from {model_path}...")
     checkpoint = torch.load(model_path, map_location='cpu')
-    # PyTorch Lightning ckpt stores weights in 'state_dict'
     state_dict = checkpoint.get('state_dict', checkpoint)
     
-    # Handle cases where the state_dict keys have 'model.' prefix (from LightningModule)
+    # Handle Lightning prefix
     if any(k.startswith('model.') for k in state_dict.keys()):
         state_dict = {k.replace('model.', ''): v for k, v in state_dict.items()}
         
@@ -61,50 +49,70 @@ def test(config_path, model_path, output_dir):
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device).eval()
-
-    print("Building evaluator...")
-    evaluator = build_evaluator(cfg.evaluator, val_dataset)
-
-    print(f"Starting evaluation on {device}...")
-    from nanodet.data.batch_process import stack_batch_img
     
-    all_results = {}
+    # Define pipeline and class names
+    pipeline = Pipeline(cfg.data.val.pipeline, cfg.data.val.keep_ratio)
+    class_names = cfg.class_names
+    if not class_names:
+        class_names = ['Asian Green Bee-eater', 'Indian Pitta', 'Gray Wagtail', 'Cattle Egret', 'Ruddy Shelduck']
+        
+    print(f"Scanning test images in: {test_images_dir}")
+    image_paths = glob.glob(os.path.join(test_images_dir, "*.jpg")) + glob.glob(os.path.join(test_images_dir, "*.png"))
+    if not image_paths:
+        print(f"No test images found in {test_images_dir}!")
+        return
+        
+    print(f"Found {len(image_paths)} images. Running predictions...")
+    
     with torch.no_grad():
-        for i, batch in enumerate(val_dataloader):
-            # Preprocess batch
-            batch_imgs = batch["img"]
-            if isinstance(batch_imgs, list):
-                batch_imgs = [img.to(device) for img in batch_imgs]
-                batch_img_tensor = stack_batch_img(batch_imgs, divisible=32)
-                batch["img"] = batch_img_tensor
-            else:
-                batch["img"] = batch["img"].to(device)
+        for i, img_path in enumerate(image_paths, 1):
+            img_name = os.path.basename(img_path)
+            raw_img = cv2.imread(img_path)
+            if raw_img is None:
+                continue
+                
+            height, width = raw_img.shape[:2]
+            img_info = {
+                "id": 0,
+                "file_name": img_name,
+                "height": height,
+                "width": width
+            }
             
-            # Send other tensors to device
-            batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+            meta = dict(img_info=img_info, raw_img=raw_img, img=raw_img)
+            meta = pipeline(None, meta, cfg.data.val.input_size)
+            meta["img"] = torch.from_numpy(meta["img"].transpose(2, 0, 1)).to(device)
+            meta = naive_collate([meta])
+            meta["img"] = stack_batch_img(meta["img"], divisible=32)
             
             # Predict
-            preds = model(batch["img"])
+            preds = model.inference(meta)
             
-            # Post process
-            dets = model.head.post_process(preds, batch)
+            # Draw result bounding boxes on image
+            # Note: show=False to avoid headless environment display errors
+            result_img = model.head.show_result(
+                meta["raw_img"][0], 
+                preds[0], 
+                class_names, 
+                score_thres=0.35, 
+                show=False
+            )
             
-            # Accumulate results
-            all_results.update(dets)
+            # Save annotated image
+            out_file = os.path.join(predictions_output_dir, img_name)
+            cv2.imwrite(out_file, result_img)
             
-            if i % 10 == 0:
-                print(f"Evaluated {i}/{len(val_dataloader)} batches")
+            if i % 50 == 0 or i == len(image_paths):
+                print(f"[{i}/{len(image_paths)}] Processed and saved: {img_name}")
 
-    print("Calculating final metrics...")
-    results = evaluator.evaluate(all_results, output_dir)
-    print("Evaluation completed.")
-    return results
+    print(f"Testing complete. Bounding box predictions saved to: {predictions_output_dir}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Test NanoDet model after training.")
+    parser = argparse.ArgumentParser(description="Test NanoDet model by generating bounding boxes.")
     parser.add_argument('--model-path', type=str, required=True, help='Path to trained model weights (.ckpt)')
     parser.add_argument('--config-path', type=str, required=True, help='Path to nanodet config YAML file')
     parser.add_argument('--output-dir', type=str, default="test_nanodet_results", help='Directory for test results')
+    parser.add_argument('--images-dir', type=str, default=None, help='Path to test images folder')
 
     args = parser.parse_args()
 
@@ -113,10 +121,9 @@ if __name__ == "__main__":
     if not os.path.exists(args.config_path):
         raise FileNotFoundError(f"Config YAML not found: {args.config_path}")
 
-    os.makedirs(args.output_dir, exist_ok=True)
-
     test(
         config_path=args.config_path,
         model_path=args.model_path,
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        images_dir=args.images_dir
     )

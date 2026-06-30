@@ -1,6 +1,35 @@
 import os
 import sys
 
+def fix_onnx_compatibility(onnx_path):
+    """Post-processes an ONNX model to force compatibility with older runtimes (like Pi)."""
+    print(f"Post-processing {onnx_path} for Raspberry Pi compatibility...")
+    try:
+        import onnx
+        model = onnx.load(onnx_path)
+        modified = False
+        
+        # Force IR version to 9
+        if model.ir_version > 9:
+            print(f"  Downgrading IR version from {model.ir_version} to 9")
+            model.ir_version = 9
+            modified = True
+            
+        # Force Opset version to 17 or lower
+        for opset in model.opset_import:
+            if (opset.domain == "" or opset.domain == "ai.onnx") and opset.version > 17:
+                print(f"  Downgrading Opset version from {opset.version} to 17")
+                opset.version = 17
+                modified = True
+                
+        if modified:
+            onnx.save(model, onnx_path)
+            print(f"Successfully saved compatibility changes to {onnx_path}")
+        else:
+            print("  Already compatible.")
+    except Exception as e:
+        print(f"Warning: Could not post-process {onnx_path} for compatibility: {e}")
+
 def quantize_onnx_model(onnx_path, output_path):
     print(f"\n=== Quantizing ONNX model to INT8: {onnx_path} ===")
     try:
@@ -13,13 +42,14 @@ def quantize_onnx_model(onnx_path, output_path):
             weight_type=QuantType.QUInt8
         )
         print(f"Successfully quantized model saved to: {output_path}")
+        fix_onnx_compatibility(output_path)
     except ImportError:
         print("Error: 'onnxruntime' or 'onnx' library is not installed. Please run: pip install onnxruntime-gpu onnxruntime")
     except Exception as e:
         print(f"Error during ONNX quantization: {e}")
 
 def main():
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     weights_dir = os.path.join(project_root, "best_weights")
     onnx_dir = os.path.join(weights_dir, "onnx")
     onnx_int8_dir = os.path.join(weights_dir, "onnx_int8")
