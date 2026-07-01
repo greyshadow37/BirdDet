@@ -309,9 +309,34 @@ def main():
                         help="Number of runs for benchmarking.")
     parser.add_argument('--csv', type=str, default=None,
                         help="Output path for CSV file to store benchmark results.")
+    parser.add_argument('--resume', action='store_true',
+                        help="Skip models that already ran successfully in the output CSV.")
     
     args = parser.parse_args()
     
+    # Load existing CSV results if resuming
+    existing_results = {}
+    if args.resume and args.csv and os.path.exists(args.csv):
+        try:
+            with open(args.csv, 'r') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    key = (row['model'], row['format'], row['image'])
+                    existing_results[key] = {
+                        'model': row['model'],
+                        'format': row['format'],
+                        'image': row['image'],
+                        'size_mb': float(row['size_mb']) if row['size_mb'] else 0.0,
+                        'avg_latency_ms': float(row['avg_latency_ms']) if row['avg_latency_ms'] else 0.0,
+                        'std_latency_ms': float(row['std_latency_ms']) if row['std_latency_ms'] else 0.0,
+                        'fps': float(row['fps']) if row['fps'] else 0.0,
+                        'ram_mb': float(row['ram_mb']) if row['ram_mb'] else 0.0,
+                        'status': row['status']
+                    }
+            print(f"Loaded {len(existing_results)} existing results to resume from.")
+        except Exception as e:
+            print(f"Warning: Could not read existing CSV to resume: {e}")
+
     # Locate best_weights directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
     potential_dirs = [
@@ -354,10 +379,15 @@ def main():
                 size, _ = get_model_fallback_info(of)
                 for img in image_paths:
                     img_name = os.path.basename(img) if img else "dummy_input"
-                    print(f"Running ONNX ({sub}): {model_name}...")
-                    res = run_onnx_inference(model_name, of, img, size, args.benchmark, args.num_runs)
-                    res['image'] = img_name
-                    results.append(res)
+                    key = (model_name, 'ONNX', img_name)
+                    if key in existing_results and existing_results[key]['status'] == 'success':
+                        print(f"Skipping ONNX ({sub}): {model_name} for {img_name} (using existing successful result)")
+                        results.append(existing_results[key])
+                    else:
+                        print(f"Running ONNX ({sub}): {model_name}...")
+                        res = run_onnx_inference(model_name, of, img, size, args.benchmark, args.num_runs)
+                        res['image'] = img_name
+                        results.append(res)
                         
     # --- 2. TFLite (Standard & INT8) ---
     for sub in ['tflite', 'tflite_int8']:
@@ -374,10 +404,15 @@ def main():
                 size, _ = get_model_fallback_info(tf_file)
                 for img in image_paths:
                     img_name = os.path.basename(img) if img else "dummy_input"
-                    print(f"Running TFLite ({sub}): {model_name}...")
-                    res = run_tflite_inference(model_name, tf_file, img, size, args.benchmark, args.num_runs)
-                    res['image'] = img_name
-                    results.append(res)
+                    key = (model_name, 'TFLite', img_name)
+                    if key in existing_results and existing_results[key]['status'] == 'success':
+                        print(f"Skipping TFLite ({sub}): {model_name} for {img_name} (using existing successful result)")
+                        results.append(existing_results[key])
+                    else:
+                        print(f"Running TFLite ({sub}): {model_name}...")
+                        res = run_tflite_inference(model_name, tf_file, img, size, args.benchmark, args.num_runs)
+                        res['image'] = img_name
+                        results.append(res)
                         
     # --- 3. NCNN ---
     ncnn_dir = os.path.join(weights_dir, 'ncnn')
@@ -393,10 +428,15 @@ def main():
                 size, outputs = get_model_fallback_info(sd)
                 for img in image_paths:
                     img_name = os.path.basename(img) if img else "dummy_input"
-                    print(f"Running NCNN: {model_name}...")
-                    res = run_ncnn_inference(model_name, pf, bin_file, img, size, outputs, args.benchmark, args.num_runs)
-                    res['image'] = img_name
-                    results.append(res)
+                    key = (model_name, 'NCNN', img_name)
+                    if key in existing_results and existing_results[key]['status'] == 'success':
+                        print(f"Skipping NCNN: {model_name} for {img_name} (using existing successful result)")
+                        results.append(existing_results[key])
+                    else:
+                        print(f"Running NCNN: {model_name}...")
+                        res = run_ncnn_inference(model_name, pf, bin_file, img, size, outputs, args.benchmark, args.num_runs)
+                        res['image'] = img_name
+                        results.append(res)
                         
     # Save to CSV
     if args.csv and results:

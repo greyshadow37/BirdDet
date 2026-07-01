@@ -12,6 +12,23 @@ def fix_onnx_compatibility(onnx_path):
         model = onnx.load(onnx_path)
         modified = False
         
+        # Remove legacy 'num_outputs' attribute from Split nodes that crashes older runtimes
+        for node in model.graph.node:
+            if node.op_type == "Split":
+                for attr in list(node.attribute):
+                    if attr.name == "num_outputs":
+                        print(f"  Removing legacy 'num_outputs' attribute from Split node: {node.name}")
+                        node.attribute.remove(attr)
+                        modified = True
+            elif node.op_type == "Resize":
+                # Only keep attributes supported by older ONNX Resize specs (e.g. Opset 11/13)
+                allowed_attrs = {"coordinate_transformation_mode", "cubic_coeff_a", "exclude_outside", "extrapolation_value", "mode", "nearest_mode"}
+                for attr in list(node.attribute):
+                    if attr.name not in allowed_attrs:
+                        print(f"  Removing unsupported Resize attribute '{attr.name}' from node: {node.name}")
+                        node.attribute.remove(attr)
+                        modified = True
+        
         # Force IR version to 9
         if model.ir_version > 9:
             print(f"  Downgrading IR version from {model.ir_version} to 9")
@@ -85,7 +102,7 @@ def export_nanodet(model_path, config_path=None, search_dir='.'):
             
             torch.onnx.export(
                 model, dummy_input, output_path, 
-                opset_version=11, 
+                opset_version=17, 
                 input_names=['data'], 
                 output_names=['output']
             )
@@ -139,6 +156,15 @@ def main():
         export_nanodet(nd_path, cfg_path)
     else:
         print(f"\nModel file not found: {nd_path}")
+
+    # Compatibility post-processing for all existing ONNX files in weights_dir
+    print("\n--- Running compatibility check for all ONNX models in weights directory ---")
+    onnx_files = glob.glob(os.path.join(args.weights_dir, '**', '*.onnx'), recursive=True)
+    for of in onnx_files:
+        # Skip if it is under onnx_int8 directory as we handle that separately
+        if 'onnx_int8' in of:
+            continue
+        fix_onnx_compatibility(of)
 
 
 if __name__ == '__main__':
