@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import argparse
 
+# Add nanodet directory to path to allow import
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, 'nanodet'))
 
@@ -46,12 +47,12 @@ def load_nanodet_model(model_path, config_path):
     return model
 
 def main():
-    parser = argparse.ArgumentParser(description='Run SVD-based EigenCAM visualizations.')
+    parser = argparse.ArgumentParser(description="Run SVD-based EigenCAM visualizations.")
     parser.add_argument('--model-path', type=str, required=True)
     parser.add_argument('--config-path', type=str, required=True)
     parser.add_argument('--name', type=str, required=True)
     parser.add_argument('--images_dir', type=str, default=os.path.join(PROJECT_ROOT, 'BirdDet', 'data', 'yolo', 'images', 'test'))
-    parser.add_argument('--output_dir', type=str, required=True)
+    parser.add_argument('--output-dir', type=str, required=True) # <--- Fixed to use hyphen
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -89,5 +90,5 @@ def main():
             
     hook_handle.remove()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

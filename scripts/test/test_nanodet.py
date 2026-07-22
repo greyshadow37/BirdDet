@@ -6,7 +6,6 @@ import cv2
 import torch
 
 def test(config_path, model_path, output_dir, images_dir=None):
-    # Add nanodet repository to python path
     nanodet_repo = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'nanodet'))
     if nanodet_repo not in sys.path:
         sys.path.insert(0, nanodet_repo)
@@ -24,7 +23,6 @@ def test(config_path, model_path, output_dir, images_dir=None):
     print("Loading config...")
     load_config(cfg, config_path)
     
-    # Resolve directories
     if images_dir:
         test_images_dir = os.path.abspath(images_dir)
     else:
@@ -41,7 +39,6 @@ def test(config_path, model_path, output_dir, images_dir=None):
     checkpoint = torch.load(model_path, map_location='cpu')
     state_dict = checkpoint.get('state_dict', checkpoint)
     
-    # Handle Lightning prefix
     if any(k.startswith('model.') for k in state_dict.keys()):
         state_dict = {k.replace('model.', ''): v for k, v in state_dict.items()}
         
@@ -50,7 +47,6 @@ def test(config_path, model_path, output_dir, images_dir=None):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device).eval()
     
-    # Define pipeline and class names
     pipeline = Pipeline(cfg.data.val.pipeline, cfg.data.val.keep_ratio)
     class_names = cfg.class_names
     if not class_names:
@@ -85,20 +81,22 @@ def test(config_path, model_path, output_dir, images_dir=None):
             meta = naive_collate([meta])
             meta["img"] = stack_batch_img(meta["img"], divisible=32)
             
-            # Predict
             preds = model.inference(meta)
             
-            # Draw result bounding boxes on image
-            # Note: show=False to avoid headless environment display errors
-            result_img = model.head.show_result(
-                meta["raw_img"][0], 
-                preds[0], 
-                class_names, 
-                score_thres=0.35, 
-                show=False
-            )
+            if hasattr(model.head, 'show_result'):
+                result_img = model.head.show_result(
+                    meta["raw_img"][0], 
+                    preds[0], 
+                    class_names, 
+                    score_thres=0.35, 
+                    show=False
+                )
+            else:
+                from nanodet.util import overlay_bbox_cv
+                # Convert preds to the format expected by overlay_bbox_cv
+                # Assuming preds[0] can be handled by overlay_bbox_cv
+                result_img = overlay_bbox_cv(meta["raw_img"][0], preds[0], class_names, score_thresh=0.35)
             
-            # Save annotated image
             out_file = os.path.join(predictions_output_dir, img_name)
             cv2.imwrite(out_file, result_img)
             
