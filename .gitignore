@@ -1,6 +1,7 @@
 data/
 results/
 scripts/train/__pycache__/
+scripts/test/__pycache__/
 models/
 inference/__pycache__
 best_weights/
